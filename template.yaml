@@ -83,11 +83,23 @@ Resources:
       Handler: reader.handler
       Policies:
         - AWSLambdaBasicExecutionRole
+        - DynamoDBReadPolicy:
+            TableName: !Ref MetaTable
       Events:
         ApiHealth:
           Type: Api
           Properties:
             Path: /health
+            Method: GET
+        ApiGetMeta:
+          Type: Api
+          Properties:
+            Path: /meta/{key+}
+            Method: GET
+        ApiGetImg:
+          Type: Api
+          Properties:
+            Path: /img/{key+}
             Method: GET
 
 Outputs:
