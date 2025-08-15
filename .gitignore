@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual env
+venv/
+.venv/
+
+# SAM / build artifacts
+.aws-sam/
+build/
+dist/
+
+# OS files
+.DS_Store
+
+# Editor settings
+.idea/
+.vscode/
