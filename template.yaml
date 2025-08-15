@@ -62,6 +62,18 @@ Resources:
       Handler: processor.handler
       Policies:
         - AWSLambdaBasicExecutionRole
+        - S3ReadPolicy:
+            BucketName: !Ref SourceBucketName
+        - S3WritePolicy:
+            BucketName: !Ref ProcessedBucketName
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MetaTable
+      Events:
+        S3ImageUpload:
+          Type: S3
+          Properties:
+            Bucket: !Ref SourceBucket
+            Events: s3:ObjectCreated:*
 
   ReadFunction:
     Type: AWS::Serverless::Function
