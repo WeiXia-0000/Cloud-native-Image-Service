@@ -65,9 +65,16 @@ def _handle_meta(key, method):
 # IMG branch
 # =========================
 def _img_get_via_s3(key):
-    url = f"https://{DST_BUCKET}.s3.amazonaws.com/{key}"
-    headers = {"Location":url}
-    return _resp(302, headers=headers)
+    try:
+        url = s3.generate_presigned_url(
+            ClientMethod="get_object",
+            Params={"Bucket":DST_BUCKET, "Key":key},
+            ExpiresIn=300 # 5 mins
+        )
+        return _json({"url":url}, 200)
+    except Exception as e:
+        logging.error(f"img_get_via_s3 error: {e}")
+        return _json({"error":"internal server error"}, 500)
 
 def _img_get_via_cf(key):
     return _json({"todo":"img_get_via_cf"})
@@ -98,6 +105,10 @@ def _handle_img(key, method):
     
     if method == "HEAD":
         resp["body"] = ""
+        if resp.get("statusCode") == 200:
+            resp["statusCode"] = 204
+        headers = resp.get("headers", {})
+        resp["headers"] = headers
     return resp
 
 def handler(event, context):
