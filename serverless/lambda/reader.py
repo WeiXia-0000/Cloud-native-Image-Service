@@ -37,48 +37,51 @@ def _table():
     return ddb.Table(TABLE)
 
 # =========================
-# META branch (CRUD)
+# META branch
 # =========================
 def _meta_get_via_ddb(pk):
-    return _json({"todo":"meta_get_via_ddb"})
+    try:
+        res = _table().get_item(Key={"pk":pk})
+        item = res.get("Item")
+        if not item:
+            return _json({"error":"not found"}, 404)
+        return _json(item)
+    except Exception as e:
+        logging.error(f"meta_get_via_ddb error: {e}")
+        return _json({"error":"internal server error"}, 500)
 
 def _meta_get_via_redis(pk):
     return _json({"todo":"meta_get_via_redis"})
-
-def _meta_post_create(key):
-    return _json({"todo":"meta_post_create"})
-
-def _meta_put_update(pk):
-    return _json({"todo":"meta_put_update"})
-
-def _meta_delete(pk):
-    return _json({"todo":"meta_delete"})
 
 def _handle_meta(key, method):
     if method == "GET":
         if ENABLE_REDIS:
             return _meta_get_via_redis(key)
         return _meta_get_via_ddb(key)
-    elif method == "POST":
-        return _meta_post_create(key)
-    elif method == "PUT":
-        return _meta_put_update(key)
-    elif method == "DELETE":
-        return _meta_delete(key)
     else:
         return _json({"error":"invalid method"}, 405)
     
 # =========================
-# IMG branch (read)
+# IMG branch
 # =========================
 def _img_get_via_s3(key):
-    return _json({"todo":"img_get_via_s3"})
+    url = f"https://{DST_BUCKET}.s3.amazonaws.com/{key}"
+    headers = {"Location":url}
+    return _resp(302, headers=headers)
 
 def _img_get_via_cf(key):
     return _json({"todo":"img_get_via_cf"})
  
 def _resolve_thumb_key(pk):
-    return None, _json({"todo":"resolve_thumb_key"})
+    try:
+        res = _table().get_item(Key={"pk":pk})
+        item = res.get("Item")
+        if not item:
+            return None, _json({"error":"not found"}, 404)
+        return item.get("thumb"), None
+    except Exception as e:
+        logging.error(f"resolve_thumb_key error: {e}")
+        return None, _json({"error":"internal server error"}, 500)
 
 def _handle_img(key, method):
     if method not in ("GET", "HEAD"):
@@ -89,9 +92,13 @@ def _handle_img(key, method):
         return _json({"error":"not found"}, 404)
     
     if ENABLE_CLOUDFRONT:
-        return _img_get_via_cf(thumb_key)
+        resp = _img_get_via_cf(thumb_key)
     else:
-        return _img_get_via_s3(thumb_key)
+        resp = _img_get_via_s3(thumb_key)
+    
+    if method == "HEAD":
+        resp["body"] = ""
+    return resp
 
 def handler(event, context):
 
