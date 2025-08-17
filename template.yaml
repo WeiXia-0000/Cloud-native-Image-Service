@@ -12,8 +12,10 @@ Globals:
       Variables:
         TABLE: !Ref MetaTable
         DST_BUCKET: !Ref ProcessedBucket
-        REDIS_HOST: ""
-        CF_DOMAIN: ""
+        REDIS_HOST: !Ref RedisHost
+        CF_DOMAIN: !Ref CloudFrontDomain
+        ENABLE_REDIS: !Ref EnableRedis
+        ENABLE_CLOUDFRONT: !Ref EnableCloudFront
 
 Parameters:
   SourceBucketName:
