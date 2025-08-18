@@ -77,7 +77,11 @@ def _img_get_via_s3(key):
         return _json({"error":"internal server error"}, 500)
 
 def _img_get_via_cf(key):
-    return _json({"todo":"img_get_via_cf"})
+    if not CF_DOMAIN:
+        return _json({"error": "cf domain not configured"}, 500)
+    cf_path = key.lstrip('/')
+    url = f"https://{CF_DOMAIN}/{cf_path}"
+    return _resp(302, "", {"Location": url})
  
 def _resolve_thumb_key(pk):
     try:

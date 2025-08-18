@@ -13,7 +13,7 @@ Globals:
         TABLE: !Ref MetaTable
         DST_BUCKET: !Ref ProcessedBucket
         REDIS_HOST: !Ref RedisHost
-        CF_DOMAIN: !Ref CloudFrontDomain
+        CF_DOMAIN: !If [ UseCloudFront, !GetAtt CloudFrontDistribution.DomainName, "" ]
         ENABLE_REDIS: !Ref EnableRedis
         ENABLE_CLOUDFRONT: !Ref EnableCloudFront
 
@@ -24,6 +24,23 @@ Parameters:
   ProcessedBucketName:
     Type: String
     Default: img-processed-bucket-demo
+  CloudFrontDomain:
+    Type: String
+    Default: ""
+  RedisHost:
+    Type: String
+    Default: ""
+  EnableRedis:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+  EnableCloudFront:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "false"
+
+Conditions:
+  UseCloudFront: !Equals [ !Ref EnableCloudFront, "true" ]
 
 Resources:
   SourceBucket:
@@ -87,6 +104,11 @@ Resources:
         - AWSLambdaBasicExecutionRole
         - DynamoDBReadPolicy:
             TableName: !Ref MetaTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource: !Sub arn:aws:s3:::${ProcessedBucket}/*
       Events:
         ApiHealth:
           Type: Api
@@ -103,6 +125,67 @@ Resources:
           Properties:
             Path: /img/{key+}
             Method: GET
+        ApiHeadMeta:
+          Type: Api
+          Properties:
+            Path: /meta/{key+}
+            Method: HEAD
+        ApiHeadImg:
+          Type: Api
+          Properties:
+            Path: /img/{key+}
+            Method: HEAD
+
+  CFOriginAccessControl:
+    Condition: UseCloudFront
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "${AWS::StackName}-oac"
+        Description: Access S3 ${ProcessedBucket} via OAC
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  CloudFrontDistribution:
+    Condition: UseCloudFront
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: ""
+        Origins:
+          - Id: ProcessedS3Origin
+            DomainName: !GetAtt ProcessedBucket.RegionalDomainName
+            S3OriginConfig: {}
+            OriginAccessControlId: !Ref CFOriginAccessControl
+        DefaultCacheBehavior:
+          TargetOriginId: ProcessedS3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          CachedMethods: [GET, HEAD]
+          ForwardedValues:
+            QueryString: false
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+
+  ProcessedBucketPolicyForCF:
+    Condition: UseCloudFront
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ProcessedBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowCloudFrontReadViaOAC
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub arn:aws:s3:::${ProcessedBucket}/*
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}
 
 Outputs:
   ApiUrl:
@@ -113,3 +196,6 @@ Outputs:
     Value: !Ref ProcessedBucketName
   TableName:
     Value: !Ref MetaTable
+  CloudFrontDomain:
+    Condition: UseCloudFront
+    Value: !GetAtt CloudFrontDistribution.DomainName
