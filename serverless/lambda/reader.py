@@ -1,8 +1,14 @@
 import os, json
 import logging
 from decimal import Decimal
-
 import boto3
+import time
+try:
+    import redis
+    HAS_REDIS = True
+except Exception:
+    redis = None
+    HAS_REDIS = False
 
 
 # ---------- Feature switches ----------
@@ -16,6 +22,13 @@ CF_DOMAIN = os.environ.get("CF_DOMAIN", "").strip()
 # ---------- AWS clients ----------
 ddb = boto3.resource("dynamodb")
 s3  = boto3.client("s3")
+
+
+_redis_client = None
+_DEF_META_TTL = 300
+
+def _table():
+    return ddb.Table(TABLE)
 
 def _resp(status, body="", headers=None, ctype="application/json"):
     h = {"Content-Type": ctype}
@@ -33,8 +46,42 @@ def _extract(event):
     key = path_params.get("key") or path_params.get('proxy')
     return path, key, method
 
-def _table():
-    return ddb.Table(TABLE)
+def _get_redis_client():
+    global _redis_client
+    if not ENABLE_REDIS or not HAS_REDIS:
+        return None
+    if _redis_client is not None:
+        return _redis_client
+    
+    host = os.getenv("REDIS_HOST", "").strip() or os.getenv("REDIS_URL", "").strip()
+    if not host:
+        return None
+    try:
+        if host.startswith("redis://") or host.startswith("rediss://"):
+            _redis_client = redis.Redis.from_url(host, decode_responses=True)
+        else:
+            parts = host.split(":", 1)
+            h = parts[0]
+            p = int(parts[1]) if len(parts) == 2 and parts[1].isdigit() else 6379
+            _redis_client = redis.Redis(host=h, port=p, decode_responses=True)
+        _redis_client.ping()
+        return _redis_client
+    except Exception as e:
+        logging.error(f"get_redis_client error: {e}")
+        return None
+
+def _cache_ttl_from_item(item):
+    try:
+        now = int(time.time())
+        raw = item.get("ttl")
+        if raw is None:
+            return _DEF_META_TTL
+        ttl_epoch = int(raw) if not isinstance(raw, Decimal) else int(raw)
+        secs = max(60, min(ttl_epoch - now, 3600))
+        return secs
+    except Exception as e:
+        logging.error(f"cache_ttl_from_item error: {e}")
+        return _DEF_META_TTL
 
 # =========================
 # META branch
@@ -51,7 +98,34 @@ def _meta_get_via_ddb(pk):
         return _json({"error":"internal server error"}, 500)
 
 def _meta_get_via_redis(pk):
-    return _json({"todo":"meta_get_via_redis"})
+    client = _get_redis_client()
+    if not client:
+        return _meta_get_via_ddb(pk)
+    try:
+        nkey = f"meta404:{pk}"
+        if client.get(nkey):
+            return _json({"error":"not found"}, 404)
+        ckey = f"meta:{pk}"
+        cached = client.get(ckey)
+        if cached:
+            return _resp(200, cached)
+        res = _table().get_item(Key={"pk":pk})
+        item = res.get("Item")
+        if not item:
+            try:
+                client.setex(nkey, 30, "1")
+            except Exception as e:
+                pass
+            return _json({"error":"not found"}, 404)
+        body = json.dumps(item, default=str)
+        try:
+            client.setex(ckey, _cache_ttl_from_item(item), body)
+        except Exception as e:
+            pass
+        return _resp(200, body)
+    except Exception as e:
+        logging.error(f"meta_get_via_redis error: {e}")
+        return _meta_get_via_ddb(pk)
 
 def _handle_meta(key, method):
     if method == "GET":
