@@ -1,0 +1,25 @@
+Benchmark results for implementation: baseline
+
+=== IMG Endpoint ===
+Timestamp: Tue Aug 19 14:36:29 CDT 2025
+Latency Results (sec):
+p50: 0.233563
+p95: 0.280817
+p99: 0.308235
+RPS: 66.67
+CloudFront Hits: 0
+CloudFront Misses: 0
+Total Requests: 0
+Hit Ratio: 0.0%
+
+=== META Endpoint ===
+Timestamp: Tue Aug 19 14:36:29 CDT 2025
+Latency Results (sec):
+p50: 0.045732
+p95: 0.230854
+p99: 2.013848
+RPS: 100.00
+CloudFront Hits: 0
+CloudFront Misses: 0
+Total Requests: 0
+Hit Ratio: 0.0%

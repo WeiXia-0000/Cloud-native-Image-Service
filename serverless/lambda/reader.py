@@ -33,6 +33,7 @@ s3  = boto3.client("s3")
 
 _redis_client = None
 _DEF_META_TTL = 300
+_REDIS_TIMEOUT_MS = int(os.getenv("REDIS_TIMEOUT_MS", "300"))  # default 300ms
 
 # Return the DynamoDB table resource
 def _table():
@@ -69,21 +70,48 @@ def _get_redis_client():
     if not host:
         return None
     try:
+        common_kwargs = dict(
+            decode_responses=True,
+            socket_timeout=_REDIS_TIMEOUT_MS / 1000.0,
+            socket_connect_timeout=_REDIS_TIMEOUT_MS / 1000.0,
+            retry_on_timeout=False,
+            socket_keepalive=True,
+            health_check_interval=30,
+        )
         if host.startswith("redis://") or host.startswith("rediss://"):
             # If the host is a Redis connection URL, create client directly from it
-            _redis_client = redis.Redis.from_url(host, decode_responses=True)
+            _redis_client = redis.Redis.from_url(host, **common_kwargs)
         else:
             # Otherwise, parse "host:port" format manually
             parts = host.split(":", 1)
             h = parts[0]
             p = int(parts[1]) if len(parts) == 2 and parts[1].isdigit() else 6379
-            _redis_client = redis.Redis(host=h, port=p, decode_responses=True)
+            _redis_client = redis.Redis(host=h, port=p, **common_kwargs)
         # Verify the connection by pinging Redis, raises error if not reachable
         _redis_client.ping()
         return _redis_client
     except Exception as e:
         logging.error(f"get_redis_client error: {e}")
         return None
+
+
+def _redis_get(client, key):
+    """Single GET with error guarding."""
+    try:
+        return client.get(key)
+    except Exception as e:
+        logging.error(f"redis get error: {e}")
+        return None
+
+
+def _redis_setex(client, key, ttl_seconds, value):
+    """Set key with TTL via pipeline to reduce RTT and partial failures."""
+    try:
+        pipe = client.pipeline(transaction=False)
+        pipe.setex(key, ttl_seconds, value)
+        pipe.execute()
+    except Exception as e:
+        logging.error(f"redis setex error: {e}")
 
 # Determine TTL (time to live) for cache from a DynamoDB item
 def _cache_ttl_from_item(item):
@@ -122,35 +150,29 @@ def _meta_get_via_redis(pk):
     if not client:
         return _meta_get_via_ddb(pk)
     try:
-        # Cache key for 404 (not found) results to avoid repeated DB hits
+        # Keys
         nkey = f"meta404:{pk}"
-        if client.get(nkey):
-            return _json({"error":"not found"}, 404)
-
-        # Cache key for valid metadata results
         ckey = f"meta:{pk}"
 
-        # If metadata found in Redis cache, return it immediately
-        cached = client.get(ckey)
-        if cached:
-            return _resp(200, cached)
+        # Fast-path: check positive cache first (common case)
+        cval = _redis_get(client, ckey)
+        if cval:
+            return _resp(200, cval)
+        # Then check negative cache
+        nval = _redis_get(client, nkey)
+        if nval:
+            return _json({"error":"not found"}, 404)
 
         # Fallback to DynamoDB if Redis cache miss
         res = _table().get_item(Key={"pk":pk})
         item = res.get("Item")
         if not item:
-            try:
-                client.setex(nkey, 30, "1")
-            except Exception as e:
-                pass
+            _redis_setex(client, nkey, 30, "1")
             return _json({"error":"not found"}, 404)
         body = json.dumps(item, default=str)
 
         # Store metadata in Redis with TTL for caching
-        try:
-            client.setex(ckey, _cache_ttl_from_item(item), body)
-        except Exception as e:
-            pass
+        _redis_setex(client, ckey, _cache_ttl_from_item(item), body)
         return _resp(200, body)
     except Exception as e:
         logging.error(f"meta_get_via_redis error: {e}")
@@ -211,17 +233,19 @@ def _resolve_thumb_key(pk):
     ckey = f"meta:{pk}"
     if client:
         try:
-            if client.get(nkey):
-                return None, _json({"error":"not found"}, 404)
-            cached = client.get(ckey)
-            if cached:
+            # Positive first, then negative
+            cval = _redis_get(client, ckey)
+            if cval:
                 try:
-                    meta = json.loads(cached)
+                    meta = json.loads(cval)
                     thumb_key = meta.get("thumb")
                     if thumb_key:
                         return thumb_key, None
-                except Exception as e:
+                except Exception:
                     pass
+            nval = _redis_get(client, nkey)
+            if nval:
+                return None, _json({"error":"not found"}, 404)
         except Exception as e:
             logging.error(f"resolve_thumb_key redis error: {e}")
 
@@ -231,18 +255,12 @@ def _resolve_thumb_key(pk):
         item = res.get("Item")
         if not item:
             if client:
-                try:
-                    client.setex(nkey, 30, "1")
-                except Exception as e:
-                    pass
+                _redis_setex(client, nkey, 30, "1")
             return None, _json({"error":"not found"}, 404)
         thumb_key = item.get("thumb")
         if client:
-            try:
-                body = json.dumps(item, default=str)
-                client.setex(ckey, _cache_ttl_from_item(item), body)
-            except Exception as e:
-                pass
+            body = json.dumps(item, default=str)
+            _redis_setex(client, ckey, _cache_ttl_from_item(item), body)
         return thumb_key, None
     except Exception as e:
         logging.error(f"resolve_thumb_key error: {e}")
