@@ -81,13 +81,6 @@ This project implements three progressively optimized variants of a cloud-native
 - **IMG RPS scales well**: Better/Redis achieve 50 RPS vs Baseline's 28.57 RPS
 - **Redis benefits would be more apparent at higher concurrency**: Connection pooling and reduced DynamoDB load
 
-**🚀 Suggested Improvements:**
-- **Redis placement**: Use same-region Redis (ElastiCache) to eliminate cross-region latency
-- **High concurrency testing**: Test with 50-100 concurrent requests to see Redis connection pooling benefits
-- **Lambda provisioned concurrency**: Reduce cold start impact on META endpoint performance
-- **Redis connection pooling**: Optimize Redis client configuration for better connection reuse
-- **CloudFront optimization**: Fine-tune cache policies for optimal image delivery performance
-
 ## Quick Start
 
 ### Prerequisites
