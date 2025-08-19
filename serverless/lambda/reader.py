@@ -162,8 +162,21 @@ def _handle_meta(key, method):
         if ENABLE_REDIS:
             return _meta_get_via_redis(key)
         return _meta_get_via_ddb(key)
+    elif method == "HEAD":
+        # HEAD should mirror GET's status code but without a body.
+        try:
+            res = _table().get_item(Key={"pk": key})
+            item_exists = "Item" in res and res["Item"] is not None
+            if not item_exists:
+                return _json({"error": "not found"}, 404)
+            # Exists: return 200 with no body
+            return _resp(200, "", {"Content-Type": "application/json"})
+        except Exception as e:
+            logging.error(f"meta HEAD error: {e}")
+            return _json({"error": "internal server error"}, 500)
     else:
-        return _json({"error":"invalid method"}, 405)
+        # 405 with proper Allow header
+        return _resp(405, json.dumps({"error": "invalid method"}), {"Allow": "GET, HEAD"})
     
 # =========================
 # IMG branch - handling image retrieval and redirection
@@ -173,13 +186,14 @@ def _img_get_via_s3(key):
     try:
         url = s3.generate_presigned_url(
             ClientMethod="get_object",
-            Params={"Bucket":DST_BUCKET, "Key":key},
-            ExpiresIn=300 # 5 mins
+            Params={"Bucket": DST_BUCKET, "Key": key},
+            ExpiresIn=300  # 5 mins
         )
-        return _json({"url":url}, 200)
+        # Align with CloudFront behavior: always redirect to the final content URL
+        return _resp(302, "", {"Location": url})
     except Exception as e:
         logging.error(f"img_get_via_s3 error: {e}")
-        return _json({"error":"internal server error"}, 500)
+        return _json({"error": "internal server error"}, 500)
 
 # Redirect to CloudFront URL for image access
 def _img_get_via_cf(key):
@@ -189,14 +203,47 @@ def _img_get_via_cf(key):
     url = f"https://{CF_DOMAIN}/{cf_path}"
     return _resp(302, "", {"Location": url})
  
-# Resolve thumbnail key from metadata in DynamoDB
+# Resolve thumbnail key
 def _resolve_thumb_key(pk):
+    # Try Redis first
+    client = _get_redis_client()
+    nkey = f"meta404:{pk}"
+    ckey = f"meta:{pk}"
+    if client:
+        try:
+            if client.get(nkey):
+                return None, _json({"error":"not found"}, 404)
+            cached = client.get(ckey)
+            if cached:
+                try:
+                    meta = json.loads(cached)
+                    thumb_key = meta.get("thumb")
+                    if thumb_key:
+                        return thumb_key, None
+                except Exception as e:
+                    pass
+        except Exception as e:
+            logging.error(f"resolve_thumb_key redis error: {e}")
+
+    # Fallback to DynamoDB
     try:
         res = _table().get_item(Key={"pk":pk})
         item = res.get("Item")
         if not item:
+            if client:
+                try:
+                    client.setex(nkey, 30, "1")
+                except Exception as e:
+                    pass
             return None, _json({"error":"not found"}, 404)
-        return item.get("thumb"), None
+        thumb_key = item.get("thumb")
+        if client:
+            try:
+                body = json.dumps(item, default=str)
+                client.setex(ckey, _cache_ttl_from_item(item), body)
+            except Exception as e:
+                pass
+        return thumb_key, None
     except Exception as e:
         logging.error(f"resolve_thumb_key error: {e}")
         return None, _json({"error":"internal server error"}, 500)
@@ -204,23 +251,22 @@ def _resolve_thumb_key(pk):
 # Handle image requests, supporting GET and HEAD methods
 def _handle_img(key, method):
     if method not in ("GET", "HEAD"):
-        return _json({"error":"invalid method"}, 405)
+        # 405 with proper Allow header
+        return _resp(405, json.dumps({"error": "invalid method"}), {"Allow": "GET, HEAD"})
 
     thumb_key, err = _resolve_thumb_key(key)
+    if err is not None:
+        return err
     if not thumb_key:
-        return _json({"error":"not found"}, 404)
-    
-    if ENABLE_CLOUDFRONT:
-        resp = _img_get_via_cf(thumb_key)
-    else:
-        resp = _img_get_via_s3(thumb_key)
-    
+        return _json({"error": "not found"}, 404)
+
+    resp = _img_get_via_cf(thumb_key) if ENABLE_CLOUDFRONT else _img_get_via_s3(thumb_key)
+
+    # For HEAD, do not include a body; keep status code (302 for redirects). If 200 body ever returned, convert to 204.
     if method == "HEAD":
         resp["body"] = ""
         if resp.get("statusCode") == 200:
             resp["statusCode"] = 204
-        headers = resp.get("headers", {})
-        resp["headers"] = headers
     return resp
 
 # Main Lambda handler function

@@ -20,10 +20,10 @@ Globals:
 Parameters:
   SourceBucketName:
     Type: String
-    Default: img-source-bucket-demo
+    Default: img-source-bucket-${AWS::StackName}
   ProcessedBucketName:
     Type: String
-    Default: img-processed-bucket-demo
+    Default: img-processed-bucket-${AWS::StackName}
   CloudFrontDomain:
     Type: String
     Default: ""
