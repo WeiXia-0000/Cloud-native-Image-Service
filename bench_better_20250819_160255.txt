@@ -1,24 +1,24 @@
-Benchmark results for implementation: redis
+Benchmark results for implementation: better
 
 === IMG Endpoint ===
-Timestamp: Tue Aug 19 14:58:28 CDT 2025
+Timestamp: Tue Aug 19 16:02:55 CDT 2025
 Latency Results (sec):
-p50: 0.203445
-p95: 0.245322
-p99: 0.264883
-RPS: 100.00
+p50: 0.079387
+p95: 0.092867
+p99: 0.097881
+RPS: 50.00
 CloudFront Hits: 20
 CloudFront Misses: 0
 Total Requests: 20
 Hit Ratio: 100.0%
 
 === META Endpoint ===
-Timestamp: Tue Aug 19 14:58:28 CDT 2025
+Timestamp: Tue Aug 19 16:02:55 CDT 2025
 Latency Results (sec):
-p50: 0.102184
-p95: 0.258504
-p99: 1.775708
-RPS: 100.00
+p50: 0.108117
+p95: 0.156970
+p99: 1.436344
+RPS: 33.33
 CloudFront Hits: 0
 CloudFront Misses: 0
 Total Requests: 0

@@ -1,24 +1,24 @@
 Benchmark results for implementation: baseline
 
 === IMG Endpoint ===
-Timestamp: Tue Aug 19 14:36:29 CDT 2025
+Timestamp: Tue Aug 19 16:01:23 CDT 2025
 Latency Results (sec):
-p50: 0.233563
-p95: 0.280817
-p99: 0.308235
-RPS: 66.67
+p50: 0.172319
+p95: 0.225739
+p99: 0.242051
+RPS: 28.57
 CloudFront Hits: 0
 CloudFront Misses: 0
 Total Requests: 0
 Hit Ratio: 0.0%
 
 === META Endpoint ===
-Timestamp: Tue Aug 19 14:36:29 CDT 2025
+Timestamp: Tue Aug 19 16:01:23 CDT 2025
 Latency Results (sec):
-p50: 0.045732
-p95: 0.230854
-p99: 2.013848
-RPS: 100.00
+p50: 0.110353
+p95: 0.162142
+p99: 0.178071
+RPS: 40.00
 CloudFront Hits: 0
 CloudFront Misses: 0
 Total Requests: 0
